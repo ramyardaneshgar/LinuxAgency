@@ -1,9 +1,9 @@
 # LinuxAgency
-Linux Agency Lab - using find, grep, sudo, ssh, cron, GTFOBins (zip, git, less, vim), python, and TTY stabilization (script, stty, export TERM) for user enumeration and privilege escalation.
+Linux Agency assessment - using find, grep, sudo, ssh, cron, GTFOBins (zip, git, less, vim), python, and TTY stabilization (script, stty, export TERM) for user enumeration and privilege escalation.
 
 By Ramyar Daneshgar 
 
-This lab followed a structured, multi-user Linux escalation scenario requiring a combination of enumeration, file system inspection, encoding analysis, local privilege escalation (LPE) techniques, and abuse of misconfigured sudo rules. Starting from low-privileged access (`agent47`), I enumerated users and escalated through 30 chained accounts, culminating in root access. Each stage required deep familiarity with Linux internals, privilege boundaries, TTY manipulation, and controlled abuse of system-level tools and scripts.
+This assessment followed a structured, multi-user Linux escalation scenario requiring a combination of enumeration, file system inspection, encoding analysis, local privilege escalation (LPE) techniques, and abuse of misconfigured sudo rules. Starting from low-privileged access (`agent47`), I enumerated users and escalated through 30 chained accounts, culminating in root access. Each stage required deep familiarity with Linux internals, privilege boundaries, TTY manipulation, and controlled abuse of system-level tools and scripts.
 
 ---
 
